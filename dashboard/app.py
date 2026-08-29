@@ -22,7 +22,7 @@ st.set_page_config(
 st.title("信贷违约预测模型仪表板")
 st.markdown("\n")
 
-# 加载模型和数据
+# 加载模型和数据（修复 LightGBM _Booster）
 @st.cache_resource
 def load_models():
     """加载已训练的模型，并修复 LightGBM _Booster 序列化问题"""
@@ -169,7 +169,7 @@ else:
     X, y = X_test, y_test
     suffix = "test"
 
-# 从缓存获取预测概率
+model = models[selected_model]
 key = f"{selected_model}_{suffix}"
 y_prob = all_probs[key]
 
