@@ -117,7 +117,6 @@ def get_all_predictions(X_val, X_test):
     结果以字典形式缓存，键为 "模型名_val" 或 "模型名_test"
     """
     all_probs = {}
-    # 使用外部 models 变量（因为 models 本身已缓存，这里不会触发重算）
     for name, model in models.items():
         all_probs[f"{name}_val"] = model.predict_proba(X_val)[:, 1]
         all_probs[f"{name}_test"] = model.predict_proba(X_test)[:, 1]
@@ -159,13 +158,13 @@ st.subheader(f"{selected_model} 模型性能概览")
 # 选择数据集
 if dataset_choice == "验证集 (Validation)":
     X, y = X_val, y_val
-    set_name = "Validation"
+    suffix = "val"
 else:
     X, y = X_test, y_test
-    set_name = "Test"
+    suffix = "test"
 
 # 获取预测
-key = f"{selected_model}_{set_name.lower()}"
+key = f"{selected_model}_{suffix}"
 y_prob = all_probs[key]
 
 # 应用阈值
