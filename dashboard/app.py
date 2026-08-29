@@ -130,6 +130,12 @@ def get_curve_data(y_true, y_prob, label):
     
     return fpr, tpr, precisions, recalls
 
+# 侧边栏：视图切换
+view_mode = st.sidebar.radio(
+    "选择视图",
+    ["模型性能", "SHAP 分析"],
+    index=0
+)
 # 侧边栏：模型选择
 st.sidebar.header("控制面板")
 
