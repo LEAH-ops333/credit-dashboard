@@ -110,6 +110,21 @@ X_val, y_val, X_test, y_test = load_data()
 thresholds = load_thresholds()
 perf_df = load_performance()
 
+@st.cache_data
+def get_all_predictions(X_val, X_test):
+    """
+    预先计算所有模型在验证集和测试集上的预测概率，
+    结果以字典形式缓存，键为 "模型名_val" 或 "模型名_test"
+    """
+    all_probs = {}
+    # 使用外部 models 变量（因为 models 本身已缓存，这里不会触发重算）
+    for name, model in models.items():
+        all_probs[f"{name}_val"] = model.predict_proba(X_val)[:, 1]
+        all_probs[f"{name}_test"] = model.predict_proba(X_test)[:, 1]
+    return all_probs
+
+all_probs = get_all_predictions(X_val, X_test)
+
 # 侧边栏：模型选择
 st.sidebar.header("控制面板")
 
@@ -150,8 +165,8 @@ else:
     set_name = "Test"
 
 # 获取预测
-model = models[selected_model]
-y_prob = model.predict_proba(X)[:, 1]
+key = f"{selected_model}_{set_name.lower()}"
+y_prob = all_probs[key]
 
 # 应用阈值
 if use_optimal:
