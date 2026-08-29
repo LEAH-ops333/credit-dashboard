@@ -185,8 +185,8 @@ if view_mode == "模型性能":
             step=0.01
         )
 else:
-    # SHAP 分析模式下，只保留模型选择（用于说明）
-    st.sidebar.info("SHAP 分析基于 LightGBM 模型（验证集 5000 样本）")
+    # SHAP 分析模式下，只保留模型选择
+    st.sidebar.info("SHAP 分析基于 LightGBM 模型")
 
 st.sidebar.markdown("\n")
 
