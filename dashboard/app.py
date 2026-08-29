@@ -2,6 +2,9 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'codes'))
 
+import model_sec_optimization
+
+import zipfile
 import streamlit as st
 import pandas as pd
 import joblib
@@ -24,8 +27,18 @@ st.markdown("\n")
 # 加载模型和数据
 @st.cache_resource
 def load_models():
-    """加载已训练的模型"""
-    models = joblib.load('../codes/best_models_f1_optimized.pkl')
+    """加载已训练的模型（自动解压）"""
+    base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
+    pkl_path = os.path.join(base_path, 'best_models_f1_optimized.pkl')
+    zip_path = os.path.join(base_path, 'best_models_f1_optimized.zip')
+    # 自动解压
+    if not os.path.exists(pkl_path) and os.path.exists(zip_path):
+        with st.spinner("解压模型文件中"):
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(base_path)
+        st.success("模型解压完成")
+    
+    models = joblib.load(pkl_path)
     return models
 
 @st.cache_data
