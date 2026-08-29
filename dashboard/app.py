@@ -2,9 +2,6 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'codes'))
 
-import model_sec_optimization
-
-import zipfile
 import streamlit as st
 import pandas as pd
 import joblib
@@ -12,6 +9,7 @@ import json
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import numpy as np
 
 # 页面配置
 st.set_page_config(
@@ -27,32 +25,23 @@ st.markdown("\n")
 # 加载模型和数据
 @st.cache_resource
 def load_models():
-    """加载已训练的模型，并修复 LightGBM _Booster"""
+    """加载已训练的模型，并修复 LightGBM _Booster 序列化问题"""
     import lightgbm as lgb
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     pkl_path = os.path.join(base_path, 'best_models_f1_optimized.pkl')
+    
     zip_path = os.path.join(base_path, 'best_models_f1_optimized.zip')
-    data_zip_path = os.path.join(base_path, 'data.zip')
-    
-    # 解压模型
     if not os.path.exists(pkl_path) and os.path.exists(zip_path):
-        with st.spinner("解压模型文件中"):
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(base_path)
+        import zipfile
+        with st.spinner("解压模型文件中..."):
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(base_path)
         st.success("模型解压完成")
-    
-    # 解压数据（包含 best_thresholds.json 等）
-    if os.path.exists(data_zip_path):
-        if not os.path.exists(os.path.join(base_path, 'best_thresholds.json')):
-            with st.spinner("解压数据文件中"):
-                with zipfile.ZipFile(data_zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(base_path)
-            st.success("数据解压完成")
     
     models = joblib.load(pkl_path)
     
-    def fix_lightgbm_booster(obj):
-        """递归修复 LightGBM 模型：用 model_to_string 重建 _Booster"""
+    # 修复 LightGBM _Booster（防止 AttributeError）
+    def fix_booster(obj):
         if isinstance(obj, lgb.LGBMClassifier):
             if obj._Booster is not None:
                 try:
@@ -62,17 +51,17 @@ def load_models():
                     obj._Booster = None
         elif isinstance(obj, dict):
             for v in obj.values():
-                fix_lightgbm_booster(v)
+                fix_booster(v)
         elif isinstance(obj, (list, tuple)):
             for item in obj:
-                fix_lightgbm_booster(item)
+                fix_booster(item)
         elif hasattr(obj, '__dict__'):
             for attr_value in obj.__dict__.values():
-                fix_lightgbm_booster(attr_value)
+                fix_booster(attr_value)
         return obj
     
     for name, model in models.items():
-        models[name] = fix_lightgbm_booster(model)
+        models[name] = fix_booster(model)
     
     return models
 
@@ -96,37 +85,49 @@ def load_thresholds():
 
 @st.cache_data
 def load_performance():
-    """加载模型性能对比"""
+    """加载性能对比数据"""
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     return pd.read_csv(os.path.join(base_path, 'final_model_performance_comparison.csv'))
 
-# 加载数据
+# 加载所有数据
 models = load_models()
 X_val, y_val, X_test, y_test = load_data()
 thresholds = load_thresholds()
 perf_df = load_performance()
 
 @st.cache_data
-def get_all_predictions(_models, X_val, X_test):
+def get_all_predictions():
     """
     预先计算所有模型在验证集和测试集上的预测概率，
-    结果以字典形式缓存，键为 "模型名_val" 或 "模型名_test"
+    缓存键基于 X_val/X_test 的哈希值（由 @st.cache_data 自动处理）
     """
-    st.write("首次加载")
     all_probs = {}
-    for name, model in _models.items():
+    for name, model in models.items():
         all_probs[f"{name}_val"] = model.predict_proba(X_val)[:, 1]
         all_probs[f"{name}_test"] = model.predict_proba(X_test)[:, 1]
     return all_probs
 
-all_probs = get_all_predictions(models, X_val, X_test)
+all_probs = get_all_predictions()
 
 @st.cache_data
 def get_curve_data(y_true, y_prob, label):
-    """根据真实标签和预测概率，缓存 ROC 和 PR 数据"""
+    """计算并缓存 ROC/PR 数据，同时采样到最多 1000 个点以加速绘制"""
     from sklearn.metrics import roc_curve, precision_recall_curve
     fpr, tpr, _ = roc_curve(y_true, y_prob)
     precisions, recalls, _ = precision_recall_curve(y_true, y_prob)
+    
+    # 采样：如果数据点超过 1000，等距采样 1000 个点，保证趋势不变
+    n = len(fpr)
+    if n > 1000:
+        idx = np.linspace(0, n-1, 1000, dtype=int)
+        fpr = fpr[idx]
+        tpr = tpr[idx]
+    n_pr = len(recalls)
+    if n_pr > 1000:
+        idx_pr = np.linspace(0, n_pr-1, 1000, dtype=int)
+        recalls = recalls[idx_pr]
+        precisions = precisions[idx_pr]
+    
     return fpr, tpr, precisions, recalls
 
 # 侧边栏：模型选择
@@ -221,7 +222,7 @@ st.plotly_chart(fig_cm, use_container_width=True)
 # ROC曲线 和 PR曲线
 st.subheader("ROC曲线 与 PR曲线")
 
-# 从缓存获取曲线数据
+# 从缓存获取曲线数据（已采样）
 fpr, tpr, precisions, recalls = get_curve_data(y, y_prob, f"{selected_model}_{suffix}")
 
 # 双图布局
