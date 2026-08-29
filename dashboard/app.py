@@ -42,14 +42,11 @@ def load_models():
         st.success("模型解压完成")
     
     # 解压数据（包含 best_thresholds.json 等）
-    data_extracted = False
     if os.path.exists(data_zip_path):
-        # 检查关键文件是否存在，如果不存在则解压
         if not os.path.exists(os.path.join(base_path, 'best_thresholds.json')):
             with st.spinner("解压数据文件中"):
                 with zipfile.ZipFile(data_zip_path, 'r') as zip_ref:
                     zip_ref.extractall(base_path)
-            data_extracted = True
             st.success("数据解压完成")
     
     models = joblib.load(pkl_path)
@@ -59,10 +56,9 @@ def load_models():
         if isinstance(obj, lgb.LGBMClassifier):
             if obj._Booster is not None:
                 try:
-                    # 提取模型字符串，重建 Booster
                     model_str = obj._Booster.model_to_string()
                     obj._Booster = lgb.Booster(model_str=model_str)
-                except Exception as e:
+                except Exception:
                     obj._Booster = None
         elif isinstance(obj, dict):
             for v in obj.values():
@@ -71,7 +67,7 @@ def load_models():
             for item in obj:
                 fix_lightgbm_booster(item)
         elif hasattr(obj, '__dict__'):
-            for attr_name, attr_value in obj.__dict__.items():
+            for attr_value in obj.__dict__.values():
                 fix_lightgbm_booster(attr_value)
         return obj
     
@@ -111,18 +107,27 @@ thresholds = load_thresholds()
 perf_df = load_performance()
 
 @st.cache_data
-def get_all_predictions(X_val, X_test):
+def get_all_predictions(_models, X_val, X_test):
     """
     预先计算所有模型在验证集和测试集上的预测概率，
     结果以字典形式缓存，键为 "模型名_val" 或 "模型名_test"
     """
+    st.write("首次加载")
     all_probs = {}
-    for name, model in models.items():
+    for name, model in _models.items():
         all_probs[f"{name}_val"] = model.predict_proba(X_val)[:, 1]
         all_probs[f"{name}_test"] = model.predict_proba(X_test)[:, 1]
     return all_probs
 
-all_probs = get_all_predictions(X_val, X_test)
+all_probs = get_all_predictions(models, X_val, X_test)
+
+@st.cache_data
+def get_curve_data(y_true, y_prob, label):
+    """根据真实标签和预测概率，缓存 ROC 和 PR 数据"""
+    from sklearn.metrics import roc_curve, precision_recall_curve
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    precisions, recalls, _ = precision_recall_curve(y_true, y_prob)
+    return fpr, tpr, precisions, recalls
 
 # 侧边栏：模型选择
 st.sidebar.header("控制面板")
@@ -163,7 +168,7 @@ else:
     X, y = X_test, y_test
     suffix = "test"
 
-# 获取预测
+# 从缓存获取预测概率
 key = f"{selected_model}_{suffix}"
 y_prob = all_probs[key]
 
@@ -216,12 +221,8 @@ st.plotly_chart(fig_cm, use_container_width=True)
 # ROC曲线 和 PR曲线
 st.subheader("ROC曲线 与 PR曲线")
 
-from sklearn.metrics import roc_curve, precision_recall_curve
-
-# ROC
-fpr, tpr, _ = roc_curve(y, y_prob)
-# PR
-precisions, recalls, _ = precision_recall_curve(y, y_prob)
+# 从缓存获取曲线数据
+fpr, tpr, precisions, recalls = get_curve_data(y, y_prob, f"{selected_model}_{suffix}")
 
 # 双图布局
 fig = make_subplots(
@@ -255,18 +256,15 @@ st.plotly_chart(fig, use_container_width=True)
 # 特征重要性
 st.subheader("树模型特征重要性")
 
-# 检查是否有 feature_importances_ 属性
 if hasattr(model, 'feature_importances_'):
     importances = model.feature_importances_
     feature_names = X.columns.tolist()
     
-    # 创建 DataFrame 并排序
     imp_df = pd.DataFrame({
         '特征': feature_names,
         '重要性': importances
     }).sort_values('重要性', ascending=True)
     
-    # 取 Top 10
     top_n = st.slider("显示 Top N 特征", min_value=5, max_value=20, value=10)
     imp_df_top = imp_df.tail(top_n)
     
@@ -293,13 +291,9 @@ metrics = st.multiselect(
     default=["精确率", "召回率", "F1分数"]
 )
 
-# 过滤数据
 if not perf_df.empty:
-    # 根据实际 DataFrame 结构调整
-    # 将数据从宽格式转为长格式
     perf_long = perf_df.melt(id_vars=['模型'], value_vars=metrics, 
                          var_name='指标', value_name='数值')
-    # 去除缺失值
     perf_long = perf_long.dropna()
     complete_models = perf_long.groupby('模型')['数值'].count()
     complete_models = complete_models[complete_models == len(metrics)].index
@@ -330,7 +324,6 @@ fig_dist = px.histogram(
 )
 fig_dist.update_layout(height=400)
 st.plotly_chart(fig_dist, use_container_width=True)
-
 
 st.markdown("\n")
 st.caption(f"数据来源: 信贷数据集 | 模型版本: {selected_model} | 阈值: {threshold:.4f}")
