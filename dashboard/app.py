@@ -27,31 +27,52 @@ st.markdown("\n")
 # 加载模型和数据
 @st.cache_resource
 def load_models():
-    """加载已训练的模型"""
+    """加载已训练的模型，并修复 LightGBM _Booster"""
     import lightgbm as lgb
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     pkl_path = os.path.join(base_path, 'best_models_f1_optimized.pkl')
     zip_path = os.path.join(base_path, 'best_models_f1_optimized.zip')
+    data_zip_path = os.path.join(base_path, 'data.zip')
     
+    # 解压模型
     if not os.path.exists(pkl_path) and os.path.exists(zip_path):
         with st.spinner("解压模型文件中"):
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(base_path)
         st.success("模型解压完成")
     
+    # 解压数据（包含 best_thresholds.json 等）
+    data_extracted = False
+    if os.path.exists(data_zip_path):
+        # 检查关键文件是否存在，如果不存在则解压
+        if not os.path.exists(os.path.join(base_path, 'best_thresholds.json')):
+            with st.spinner("解压数据文件中"):
+                with zipfile.ZipFile(data_zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(base_path)
+            data_extracted = True
+            st.success("数据解压完成")
+    
     models = joblib.load(pkl_path)
     
     def fix_lightgbm_booster(obj):
-        """递归修复所有 LightGBM 模型的 booster"""
+        """递归修复 LightGBM 模型：用 model_to_string 重建 _Booster"""
         if isinstance(obj, lgb.LGBMClassifier):
-            obj._Booster = None
+            if obj._Booster is not None:
+                try:
+                    # 提取模型字符串，重建 Booster
+                    model_str = obj._Booster.model_to_string()
+                    obj._Booster = lgb.Booster(model_str=model_str)
+                except Exception as e:
+                    obj._Booster = None
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                fix_lightgbm_booster(v)
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                fix_lightgbm_booster(item)
         elif hasattr(obj, '__dict__'):
-            for key, value in obj.__dict__.items():
-                if isinstance(value, (list, tuple)):
-                    for item in value:
-                        fix_lightgbm_booster(item)
-                else:
-                    fix_lightgbm_booster(value)
+            for attr_name, attr_value in obj.__dict__.items():
+                fix_lightgbm_booster(attr_value)
         return obj
     
     for name, model in models.items():
@@ -71,6 +92,7 @@ def load_data():
 
 @st.cache_data
 def load_thresholds():
+    """加载最优阈值"""
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     with open(os.path.join(base_path, 'best_thresholds.json'), 'r') as f:
         thresholds = json.load(f)
@@ -78,6 +100,7 @@ def load_thresholds():
 
 @st.cache_data
 def load_performance():
+    """加载模型性能对比"""
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     return pd.read_csv(os.path.join(base_path, 'final_model_performance_comparison.csv'))
 
