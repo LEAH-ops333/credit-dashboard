@@ -53,15 +53,15 @@ def load_data():
 
 @st.cache_data
 def load_thresholds():
-    """加载最优阈值"""
-    with open('../codes/best_thresholds.json', 'r') as f:
+    base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
+    with open(os.path.join(base_path, 'best_thresholds.json'), 'r') as f:
         thresholds = json.load(f)
     return thresholds
 
 @st.cache_data
 def load_performance():
-    """加载性能对比数据"""
-    return pd.read_csv('../codes/final_model_performance_comparison.csv')
+    base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
+    return pd.read_csv(os.path.join(base_path, 'final_model_performance_comparison.csv'))
 
 # 加载数据
 models = load_models()
