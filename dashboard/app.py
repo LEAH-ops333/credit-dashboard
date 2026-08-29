@@ -27,11 +27,12 @@ st.markdown("\n")
 # 加载模型和数据
 @st.cache_resource
 def load_models():
-    """加载已训练的模型（自动解压）"""
+    """加载已训练的模型"""
+    import lightgbm as lgb
     base_path = os.path.join(os.path.dirname(__file__), '..', 'codes')
     pkl_path = os.path.join(base_path, 'best_models_f1_optimized.pkl')
     zip_path = os.path.join(base_path, 'best_models_f1_optimized.zip')
-    # 自动解压
+    
     if not os.path.exists(pkl_path) and os.path.exists(zip_path):
         with st.spinner("解压模型文件中"):
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -39,6 +40,23 @@ def load_models():
         st.success("模型解压完成")
     
     models = joblib.load(pkl_path)
+    
+    def fix_lightgbm_booster(obj):
+        """递归修复所有 LightGBM 模型的 booster"""
+        if isinstance(obj, lgb.LGBMClassifier):
+            obj._Booster = None
+        elif hasattr(obj, '__dict__'):
+            for key, value in obj.__dict__.items():
+                if isinstance(value, (list, tuple)):
+                    for item in value:
+                        fix_lightgbm_booster(item)
+                else:
+                    fix_lightgbm_booster(value)
+        return obj
+    
+    for name, model in models.items():
+        models[name] = fix_lightgbm_booster(model)
+    
     return models
 
 @st.cache_data
